@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import pc from 'picocolors';
+import { stripVTControlCharacters } from 'node:util';
 
 export function privateDir(path: string): string {
   const absolute = resolve(path);
@@ -9,12 +10,18 @@ export function privateDir(path: string): string {
   return absolute;
 }
 export const errorText = (e: unknown): string => e instanceof Error ? e.message : String(e);
+/** Website text is untrusted terminal input, including OSC clipboard/hyperlink sequences. */
+export function terminalText(text: string): string {
+  return stripVTControlCharacters(text)
+    .replace(/\u001b\][^\u0007]*(?:\u0007|$)/g, '')
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
+}
 export const log = {
-  info: (s: string) => console.log(pc.cyan(s)),
-  success: (s: string) => console.log(pc.green(s)),
-  warn: (s: string) => console.log(pc.yellow(s)),
-  error: (s: string) => console.error(pc.red(s)),
-  debug: (s: string) => { if (process.env.CONNECT_DEBUG === '1') console.log(pc.dim(s)); },
+  info: (s: string) => console.log(pc.cyan(terminalText(s))),
+  success: (s: string) => console.log(pc.green(terminalText(s))),
+  warn: (s: string) => console.log(pc.yellow(terminalText(s))),
+  error: (s: string) => console.error(pc.red(terminalText(s))),
+  debug: (s: string) => { if (process.env.CONNECT_DEBUG === '1') console.log(pc.dim(terminalText(s))); },
 };
 export function throwIfAborted(signal?: AbortSignal): void { signal?.throwIfAborted(); }
 export async function pause(ms: number, signal?: AbortSignal): Promise<void> {

@@ -1,5 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { checkServerIdentity } from 'node:tls';
+import { Agent, ProxyAgent, fetch } from 'undici';
 
 export class HttpError extends Error {
   constructor(public status: number) { super(`Сайт вернул HTTP ${status}${status === 403 ? ' Forbidden: доступ запрещён' : ''}`); }
@@ -14,18 +16,62 @@ export function publicAddress(ip: string): boolean {
       (a === 198 && (b === 18 || b === 19)));
   }
   // Global unicast only; mapped IPv4 and local IPv6 are excluded.
-  return isIP(ip) === 6 && /^[23][0-9a-f]{3}:/i.test(ip);
+  return isIP(ip) === 6 && /^[23][0-9a-f]{3}:/i.test(ip) && !/^2002:|^2001:(?:0*:|db8:)/i.test(ip);
 }
 
-async function checkUrl(url: URL): Promise<void> {
+async function checkUrl(url: URL): Promise<{ address: string; family: number }> {
   if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')) {
     throw new Error('Поддерживаются только публичные HTTPS-ссылки без учётных данных.');
   }
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true });
+  const addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookup(host, { all: true });
   if (!addresses.length || addresses.some(a => !publicAddress(a.address))) {
     throw new Error('Ссылка ведёт на локальный или служебный адрес.');
   }
+  return addresses.find(a => a.family === 4) ?? addresses[0]!;
+}
+
+/** Proxies are configured by the operator, never by order data. */
+export function proxyFor(url: URL, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const bypass = (env.no_proxy ?? env.NO_PROXY ?? '').split(',').some(entry => {
+    let rule = entry.trim().toLowerCase();
+    if (!rule) return false;
+    if (rule === '*') return true;
+    const port = /:(\d+)$/.exec(rule);
+    if (port && !rule.endsWith(']')) {
+      if (port[1] !== (url.port || '443')) return false;
+      rule = rule.slice(0, -port[0].length);
+    }
+    rule = rule.replace(/^\[|\]$/g, '').replace(/^\*?\./, '');
+    return host === rule || (!isIP(host) && host.endsWith('.' + rule));
+  });
+  if (bypass) return undefined;
+  return env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY || undefined;
+}
+
+const TRUSTED_PROXY_HOSTS = new Set(['connect.tg', 't.me', 'telegram.me', 'www.t.me', 'www.telegram.me']);
+
+/** Customer domains always use an IP URL, including CONNECT. Only fixed provider domains may use proxy DNS. */
+export function pinnedTransport(url: URL, address: string, proxy?: string) {
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const target = new URL(url);
+  if (!proxy || !TRUSTED_PROXY_HOSTS.has(hostname)) {
+    target.hostname = isIP(address) === 6 ? `[${address}]` : address;
+  }
+  const tls = {
+    rejectUnauthorized: true,
+    ...(isIP(hostname) ? {} : { servername: hostname }),
+    checkServerIdentity: (_host: string, cert: Parameters<typeof checkServerIdentity>[1]) => checkServerIdentity(hostname, cert),
+  };
+  let dispatcher: Agent | ProxyAgent;
+  if (proxy) {
+    let proxyUrl: URL;
+    try { proxyUrl = new URL(proxy); } catch { throw new Error('Некорректный URL сетевого прокси.'); }
+    if (!['http:', 'https:'].includes(proxyUrl.protocol)) throw new Error('HTTP-сбор поддерживает HTTP/HTTPS-прокси.');
+    dispatcher = new ProxyAgent({ uri: proxyUrl.href, requestTls: tls, proxyTls: { rejectUnauthorized: true } });
+  } else dispatcher = new Agent({ connect: tls });
+  return { target, dispatcher, host: url.host };
 }
 
 export type DocumentResponse = { url: string; text: string; contentType: string; location: string | null };
@@ -35,36 +81,42 @@ export async function getDocument(
   let url = new URL(input);
   for (let redirects = 0; redirects <= 5; redirects++) {
     signal?.throwIfAborted();
-    await checkUrl(url);
+    const { address } = await checkUrl(url);
     const timeout = AbortSignal.timeout(30_000);
-    const response = await fetch(url, {
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      redirect: 'manual', headers: { 'User-Agent': 'auto-connect-vacancies/0.1', Accept: 'text/html, application/json' },
-    });
-    const location = response.headers.get('location');
-    if ([301, 302, 303, 307, 308].includes(response.status) && location) {
-      await response.body?.cancel();
-      const target = new URL(location, url);
-      await checkUrl(target);
-      if (!follow) return { url: url.href, text: '', contentType: '', location: target.href };
-      url = target;
-      continue;
-    }
-    if (!response.ok) { await response.body?.cancel(); throw new HttpError(response.status); }
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('Сайт вернул пустой ответ.');
-    const parts: Uint8Array[] = [];
-    let size = 0;
+    const transport = pinnedTransport(url, address, proxyFor(url));
     try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.length;
-        if (size > 5 * 1024 * 1024) { await reader.cancel(); throw new Error('Страница превышает допустимый размер 5 МБ.'); }
-        parts.push(value);
+      const response = await fetch(transport.target, {
+        dispatcher: transport.dispatcher,
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        redirect: 'manual', headers: { Host: transport.host, 'User-Agent': 'auto-connect-vacancies/0.1', Accept: 'text/html, application/json' },
+      });
+      const location = response.headers.get('location');
+      if ([301, 302, 303, 307, 308].includes(response.status) && location) {
+        await response.body?.cancel();
+        const target = new URL(location, url);
+        await checkUrl(target);
+        if (!follow) return { url: url.href, text: '', contentType: '', location: target.href };
+        url = target;
+        continue;
       }
-    } finally { reader.releaseLock(); }
-    return { url: url.href, text: Buffer.concat(parts).toString('utf8'), contentType: response.headers.get('content-type') ?? '', location: null };
+      if (!response.ok) { await response.body?.cancel(); throw new HttpError(response.status); }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Сайт вернул пустой ответ.');
+      const parts: Uint8Array[] = [];
+      let size = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.length;
+          if (size > 5 * 1024 * 1024) { await reader.cancel(); throw new Error('Страница превышает допустимый размер 5 МБ.'); }
+          parts.push(value);
+        }
+      } finally { reader.releaseLock(); }
+      return { url: url.href, text: Buffer.concat(parts).toString('utf8'), contentType: response.headers.get('content-type') ?? '', location: null };
+    } finally {
+      await transport.dispatcher.destroy();
+    }
   }
   throw new Error('Слишком много перенаправлений.');
 }

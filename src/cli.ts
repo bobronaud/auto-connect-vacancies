@@ -4,7 +4,7 @@ import { select, Separator } from '@inquirer/prompts';
 import pc from 'picocolors';
 import { loadConfig } from './config.js';
 import { acquireLock, Store } from './storage.js';
-import { errorText, log, privateDir } from './utils.js';
+import { errorText, log, privateDir, terminalText } from './utils.js';
 import { ConnectClient, collect } from './connect/client.js';
 import { Telegram } from './telegram.js';
 import { applyQueue } from './apply.js';
@@ -35,18 +35,18 @@ async function history(store: Store, signal: AbortSignal): Promise<void> {
     const items = store.history().filter(a => kind === 'sent' ? a.status === 'sent' : a.status !== 'sent');
     if (!items.length) { log.info('Здесь пока нет откликов.'); return; }
     const id = await select<number>({ message: '', theme, pageSize: 12, choices: [
-      ...items.map(a => ({ value: a.id, name: `${labels[a.status]} · ${new Date(a.createdAt).toLocaleString('ru-RU')} · ${a.snapshot.title}` })),
+      ...items.map(a => ({ value: a.id, name: `${labels[a.status]} · ${new Date(a.createdAt).toLocaleString('ru-RU')} · ${terminalText(a.snapshot.title).replace(/\s+/g, ' ')}` })),
       new Separator(' '), { name: '↩  Назад', value: -1 },
     ] }, { ...context, signal });
     if (id === -1) return;
     const a = items.find(a => a.id === id)!;
-    console.log(`\n${pc.bold(pc.cyan(a.snapshot.title))}\n${pc.dim(a.snapshot.url)}\n`);
-    console.log(pc.bold('Описание\n') + a.snapshot.description);
-    console.log('\n' + pc.bold('Требования к навыкам\n') + (a.snapshot.skills || 'Не указаны'));
-    console.log('\n' + pc.bold(a.status === 'sent' ? 'Отправленное письмо\n' : 'Письмо\n') + (a.letter || 'Не сформировано'));
-    console.log(`\n${labels[a.status]} · ${a.recipient ? '@' + a.recipient : 'Получатель не определён'} · ${new Date(a.createdAt).toLocaleString('ru-RU')}`);
+    console.log(`\n${pc.bold(pc.cyan(terminalText(a.snapshot.title)))}\n${pc.dim(terminalText(a.snapshot.url))}\n`);
+    console.log(pc.bold('Описание\n') + terminalText(a.snapshot.description));
+    console.log('\n' + pc.bold('Требования к навыкам\n') + terminalText(a.snapshot.skills || 'Не указаны'));
+    console.log('\n' + pc.bold(a.status === 'sent' ? 'Отправленное письмо\n' : 'Письмо\n') + terminalText(a.letter || 'Не сформировано'));
+    console.log(`\n${labels[a.status]} · ${a.recipient ? '@' + terminalText(a.recipient) : 'Получатель не определён'} · ${new Date(a.createdAt).toLocaleString('ru-RU')}`);
     if (a.messageId) console.log(`Telegram ID сообщения: ${a.messageId}`);
-    if (a.detail) console.log(pc.dim(a.detail));
+    if (a.detail) console.log(pc.dim(terminalText(a.detail)));
     console.log();
   }
 }
