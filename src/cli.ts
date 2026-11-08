@@ -10,14 +10,9 @@ import { Telegram } from './telegram.js';
 import { applyQueue } from './apply.js';
 import { generateLetter } from './letters.js';
 import type { AttemptStatus } from './types.js';
+import { testResponse } from './test-response.js';
+import { theme, context } from './menu.js';
 
-const theme = {
-  prefix: '', icon: { cursor: pc.cyan('❯') },
-  style: { message: () => '', highlight: (text: string) => pc.bold(text),
-    keysHelpTip: () => pc.dim('↑↓ перемещение • Enter выбрать • Ctrl+C выход'),
-  },
-};
-const context = { clearPromptOnDone: true };
 const labels: Record<AttemptStatus, string> = {
   sending: 'Отправляется', sent: 'Отправлен', failed: 'Ошибка',
   unconfirmed: 'Не подтверждён', skipped: 'Пропущен', draft: 'Черновик',
@@ -81,6 +76,7 @@ async function main(): Promise<void> {
       const key = await select({ message: '', theme, pageSize: 8, choices: [
         { value: 'collect', name: pc.green('📥  Собрать заказы') },
         { value: 'apply', name: pc.yellow(`🚀  Откликнуться на заказы${queue.length ? ` (${queue.length})` : ''}`) },
+        { value: 'test', name: pc.cyan('🧪  Протестировать отклик') },
         { value: 'history', name: pc.blue('📂  Посмотреть свои отклики') },
         { value: 'login', name: pc.cyan('🔑  Авторизоваться в Telegram') },
         new Separator(pc.dim('  ────────────────────────────────')),
@@ -90,6 +86,7 @@ async function main(): Promise<void> {
       active = new AbortController();
       try {
         if (key === 'history') await history(store, lifetime.signal);
+        else if (key === 'test') await testResponse(store, config, active.signal);
         else if (key === 'collect') {
           log.info('Собираю открытые заказы Telegram по пяти специализациям…');
           await collect(store, new ConnectClient(active.signal), active.signal);

@@ -66,6 +66,10 @@ export class Store {
   blocked(id: string): boolean {
     return !!this.db.prepare("SELECT 1 FROM attempts WHERE order_id=? AND status IN ('sent','sending','unconfirmed') LIMIT 1").get(id);
   }
+  orders(): Order[] {
+    const rows = this.db.prepare('SELECT payload FROM orders ORDER BY collected_at DESC, id').all() as { payload: string }[];
+    return rows.map(r => JSON.parse(r.payload) as Order);
+  }
   queue(): Order[] {
     const rows = this.db.prepare("SELECT payload FROM orders WHERE id NOT IN (SELECT order_id FROM attempts WHERE status IN ('sent','sending','unconfirmed')) ORDER BY collected_at DESC, id").all() as { payload: string }[];
     return rows.map(r => JSON.parse(r.payload) as Order).filter(isRelevant);

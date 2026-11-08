@@ -4,7 +4,7 @@ import { codexArgs, parseCodexEvents } from '../src/llm/codexCli.js';
 import type { Config } from '../src/config.js';
 import { order, validLetter } from './fixtures.js';
 
-const config: Config = { browser: { headless: true }, llm: { effort: 'medium', timeoutSec: 180, maxChars: 1200, candidate: 'Более 10 лет опыта' }, apply: { delaySec: 0, dryRun: false } };
+const config: Config = { browser: { headless: true }, llm: { effort: 'medium', timeoutSec: 180, maxChars: 1200, candidate: '5+ лет опыта' }, apply: { delaySec: 0, dryRun: false } };
 describe('Генерация писем', () => {
   it('передаёт полное описание и навыки и возвращает готовое письмо', async () => {
     const run = vi.fn(async (_req: { system: string; prompt: string }) => validLetter);
