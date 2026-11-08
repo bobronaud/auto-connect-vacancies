@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.data/
+config.yaml
+*.log
+.env
+.env.*
+*.pem
+*.key
+coverage/
