@@ -78,7 +78,7 @@ async function main(): Promise<void> {
         { value: 'apply', name: pc.yellow(`🚀  Откликнуться на заказы${queue.length ? ` (${queue.length})` : ''}`) },
         { value: 'test', name: pc.cyan('🧪  Протестировать отклик') },
         { value: 'history', name: pc.blue('📂  Посмотреть свои отклики') },
-        { value: 'delete-unsuccessful', name: pc.red('🗑  Удалить неуспешные') },
+        { value: 'delete-unsuccessful', name: pc.red('🗑️  Удалить неуспешные') },
         { value: 'login', name: pc.cyan('🔑  Авторизоваться в Telegram') },
         new Separator(pc.dim('  ────────────────────────────────')),
         { value: 'exit', name: pc.red('🚪  Выйти') },
