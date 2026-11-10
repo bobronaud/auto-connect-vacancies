@@ -78,6 +78,7 @@ async function main(): Promise<void> {
         { value: 'apply', name: pc.yellow(`🚀  Откликнуться на заказы${queue.length ? ` (${queue.length})` : ''}`) },
         { value: 'test', name: pc.cyan('🧪  Протестировать отклик') },
         { value: 'history', name: pc.blue('📂  Посмотреть свои отклики') },
+        { value: 'delete-unsuccessful', name: pc.red('🗑  Удалить неуспешные') },
         { value: 'login', name: pc.cyan('🔑  Авторизоваться в Telegram') },
         new Separator(pc.dim('  ────────────────────────────────')),
         { value: 'exit', name: pc.red('🚪  Выйти') },
@@ -86,6 +87,11 @@ async function main(): Promise<void> {
       active = new AbortController();
       try {
         if (key === 'history') await history(store, lifetime.signal);
+        else if (key === 'delete-unsuccessful') {
+          const count = store.excludeUnsuccessful(config.collect.excludedKeywords);
+          if (count) log.success(`Удалено неуспешных заказов: ${count}. История откликов сохранена.`);
+          else log.info('Неуспешных заказов для удаления нет.');
+        }
         else if (key === 'test') await testResponse(store, config, active.signal);
         else if (key === 'collect') {
           log.info('Собираю открытые заказы Telegram по пяти специализациям…');

@@ -72,6 +72,24 @@ export class Store {
   excluded(id: string): boolean {
     return !!this.db.prepare('SELECT 1 FROM excluded_orders WHERE id=?').get(id);
   }
+  excludeUnsuccessful(excludedKeywords: readonly string[] = []): number {
+    return this.db.transaction(() => {
+      const latest = new Map<string, AttemptStatus>();
+      const protectedIds = new Set<string>();
+      for (const attempt of this.history()) {
+        if (!latest.has(attempt.orderId)) latest.set(attempt.orderId, attempt.status);
+        if (attempt.status === 'sent' || attempt.status === 'sending') protectedIds.add(attempt.orderId);
+      }
+      const ids = this.orders(excludedKeywords).filter(o => {
+        if (protectedIds.has(o.id)) return false;
+        const status = latest.get(o.id);
+        return !isRelevant(o, excludedKeywords) || !o.contact ||
+          status === 'failed' || status === 'skipped' || status === 'unconfirmed';
+      }).map(o => o.id);
+      this.exclude(ids);
+      return ids.length;
+    })();
+  }
   upsert(o: Order): void {
     if (this.excluded(o.id)) return;
     this.db.prepare('INSERT INTO orders VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, collected_at=excluded.collected_at')

@@ -54,6 +54,51 @@ describe('Хранение', () => {
     expect(store.queue()).toHaveLength(0);
     expect(() => store.start(o, validLetter)).toThrow('уже существует');
   });
+  it('удаляет все неуспешные заказы, сохраняя историю и исключения после повторного сбора', () => {
+    const unsuccessful = [
+      order({ id: 'failed' }), order({ id: 'skipped' }), order({ id: 'unconfirmed' }),
+      order({ id: 'no-contact', contact: null }), order({ id: 'closed', open: false }),
+      order({ id: 'irrelevant', platform: 'Другое' }),
+    ];
+    for (const o of unsuccessful) store.upsert(o);
+    store.start(unsuccessful[0]!, '', 'failed');
+    store.start(unsuccessful[1]!, '', 'skipped');
+    store.start(unsuccessful[2]!, validLetter, 'unconfirmed');
+    const history = store.history();
+
+    expect(store.excludeUnsuccessful()).toBe(unsuccessful.length);
+    expect(store.orders()).toEqual([]);
+    expect(store.queue()).toEqual([]);
+    expect(store.history()).toEqual(history);
+    expect(store.excludeUnsuccessful()).toBe(0);
+    store.close(); store = new Store(join(dir, 'db.sqlite'));
+    for (const o of unsuccessful) store.upsert({ ...o, contact: 'test_client', open: true });
+    expect(store.orders()).toEqual([]);
+    expect(store.history()).toEqual(history);
+  });
+  it('сохраняет новые заказы, черновики, успешные повторы и начатые отправки', () => {
+    const fresh = order({ id: 'fresh' });
+    const draft = order({ id: 'draft' });
+    const sent = order({ id: 'sent' });
+    const sending = order({ id: 'sending' });
+    for (const o of [fresh, draft, sent, sending]) store.upsert(o);
+    store.start(draft, '', 'failed');
+    store.start(draft, validLetter, 'draft');
+    store.start(sent, '', 'failed');
+    store.start(sent, validLetter, 'sent');
+    store.upsert({ ...sent, contact: null, open: false });
+    store.start(sending, validLetter);
+    store.upsert({ ...sending, contact: null });
+
+    expect(store.excludeUnsuccessful()).toBe(0);
+    expect(store.orders()).toHaveLength(4);
+    expect(store.queue().map(o => o.id)).toEqual(['draft', 'fresh']);
+  });
+  it('не затрагивает заказы, скрытые пользовательскими фильтрами', () => {
+    store.upsert(order({ description: 'BlockedBrand', contact: null }));
+    expect(store.excludeUnsuccessful(['blockedbrand'])).toBe(0);
+    expect(store.orders()).toHaveLength(1);
+  });
   it('после сбоя переводит sending в unconfirmed и исключает повтор', () => {
     const o = order(); store.upsert(o); store.start(o, validLetter);
     store.close(); store = new Store(join(dir, 'db.sqlite'));
