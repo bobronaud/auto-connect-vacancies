@@ -14,7 +14,7 @@ export type ApplyDependencies = {
 };
 
 export async function applyQueue(store: Store, config: Config, deps: ApplyDependencies, signal?: AbortSignal): Promise<void> {
-  const queue = store.queue();
+  const queue = store.queue(config.collect.excludedKeywords);
   if (!queue.length) { log.info('Очередь пуста. Сначала выберите «Собрать заказы».'); return; }
   let sent = 0, skipped = 0, failed = 0;
   for (let index = 0; index < queue.length; index++) {
@@ -41,8 +41,8 @@ export async function applyQueue(store: Store, config: Config, deps: ApplyDepend
       log.warn(`  Заказ не отправлен: ${errorText(e)}`);
       continue;
     }
-    if (!isRelevant(o) || !o.contact) {
-      const reason = !isRelevant(o) ? 'Заказ закрыт или больше не соответствует фильтрам' : o.contactReason ?? 'Нет однозначного контакта';
+    if (!isRelevant(o, config.collect.excludedKeywords) || !o.contact) {
+      const reason = !isRelevant(o, config.collect.excludedKeywords) ? 'Заказ закрыт или больше не соответствует фильтрам' : o.contactReason ?? 'Нет однозначного контакта';
       store.start(o, '', 'skipped', reason);
       log.warn(`  Пропущен: ${reason}`);
       skipped++;

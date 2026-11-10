@@ -96,7 +96,7 @@ export class ConnectClient {
   }
 }
 
-export async function collect(store: Store, client: ConnectClient, signal?: AbortSignal): Promise<void> {
+export async function collect(store: Store, client: ConnectClient, signal?: AbortSignal, excludedKeywords: readonly string[] = []): Promise<void> {
   let saved = 0, unavailable = 0, skipped = 0, forbidden = 0;
   for await (const url of client.links()) {
     throwIfAborted(signal);
@@ -104,9 +104,9 @@ export async function collect(store: Store, client: ConnectClient, signal?: Abor
     if (store.blocked(id)) { skipped++; continue; }
     try {
       let o = await client.order(url);
-      if (hasForbiddenKeyword(o)) { forbidden++; continue; }
+      if (hasForbiddenKeyword(o, excludedKeywords)) { forbidden++; continue; }
       if (isRelevant(o)) o = await client.resolve(o);
-      if (hasForbiddenKeyword(o)) { forbidden++; continue; }
+      if (hasForbiddenKeyword(o, excludedKeywords)) { forbidden++; continue; }
       store.upsert(o);
       if (isRelevant(o)) {
         saved++;
@@ -120,5 +120,5 @@ export async function collect(store: Store, client: ConnectClient, signal?: Abor
     }
     await pause(250, signal);
   }
-  log.success(`Сбор завершён. Подходящих: ${saved}, без однозначного контакта: ${unavailable}, уже обработано: ${skipped}, исключено по слову Runforge: ${forbidden}.`);
+  log.success(`Сбор завершён. Подходящих: ${saved}, без однозначного контакта: ${unavailable}, уже обработано: ${skipped}, исключено по ключевым словам: ${forbidden}.`);
 }

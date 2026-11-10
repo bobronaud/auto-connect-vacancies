@@ -9,7 +9,7 @@ import { ConnectClient, collect } from './connect/client.js';
 import { Telegram } from './telegram.js';
 import { applyQueue } from './apply.js';
 import { generateLetter } from './letters.js';
-import type { AttemptStatus } from './types.js';
+import { isRelevant, type AttemptStatus } from './types.js';
 import { testResponse } from './test-response.js';
 import { theme, context } from './menu.js';
 
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
     store = new Store();
     while (!stopping) {
       const config = loadConfig();
-      const queue = store.queue();
+      const queue = store.queue(config.collect.excludedKeywords);
       const sent = store.history().filter(a => a.status === 'sent').length;
       console.log(`\n${pc.bold(pc.cyan('  CONNECT'))} ${pc.dim('• заказы и отклики')}\n`);
       console.log(pc.dim(`  В очереди: ${queue.length} · С контактом: ${queue.filter(o => o.contact).length} · Отправлено: ${sent} · ${existsSync('.data/telegram-profile') ? 'профиль Telegram сохранён' : 'вход в Telegram не выполнен'}`));
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
         else if (key === 'test') await testResponse(store, config, active.signal);
         else if (key === 'collect') {
           log.info('Собираю открытые заказы Telegram по пяти специализациям…');
-          await collect(store, new ConnectClient(active.signal), active.signal);
+          await collect(store, new ConnectClient(active.signal), active.signal, config.collect.excludedKeywords);
         } else {
           telegram = new Telegram(config, active.signal);
           if (key === 'login') await telegram.login();
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
             await applyQueue(store, config, {
               refresh: async o => {
                 const current = await client.order(o.url);
-                return current.open ? client.resolve(current) : current;
+                return isRelevant(current, config.collect.excludedKeywords) ? client.resolve(current) : current;
               },
               letter: o => generateLetter(o, config, signal),
               sender: telegram,

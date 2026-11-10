@@ -7,7 +7,7 @@ import { theme, context } from './menu.js';
 import { log, terminalText, throwIfAborted } from './utils.js';
 
 export async function testResponse(store: Store, config: Config, signal: AbortSignal): Promise<void> {
-  const orders = store.orders();
+  const orders = store.orders(config.collect.excludedKeywords);
   if (!orders.length) {
     log.info('Сохранённых заказов пока нет. Сначала выберите «Собрать заказы».');
     return;

@@ -32,12 +32,13 @@ export type Attempt = {
   createdAt: string;
 };
 
-export function hasForbiddenKeyword(o: Order): boolean {
+export function hasForbiddenKeyword(o: Order, excludedKeywords: readonly string[] = []): boolean {
   return [o.title, o.description, o.skills, o.platform, ...o.specializations,
-    o.budget, o.sourceUrl, o.contact].some(value => /runforge/i.test(value ?? ''));
+    o.budget, o.sourceUrl, o.contact].some(value => excludedKeywords.some(keyword => keyword.trim() !== '' &&
+      (value ?? '').toLowerCase().includes(keyword.trim().toLowerCase())));
 }
 
-export function isRelevant(o: Order): boolean {
-  return !hasForbiddenKeyword(o) && o.open && /^Telegram(?:-чат)?$/i.test(o.platform.trim()) &&
+export function isRelevant(o: Order, excludedKeywords: readonly string[] = []): boolean {
+  return !hasForbiddenKeyword(o, excludedKeywords) && o.open && /^Telegram(?:-чат)?$/i.test(o.platform.trim()) &&
     o.specializations.some(s => (SPECIALIZATIONS as readonly string[]).includes(s));
 }

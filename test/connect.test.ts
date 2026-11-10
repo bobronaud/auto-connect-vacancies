@@ -35,13 +35,20 @@ describe('Карточки и контакты', () => {
     expect(isRelevant(order({ specializations: ['Бэкенд-разработка'] }))).toBe(false);
   });
   it.each([
-    { title: 'Проект Runforge' },
-    { description: 'Разработка для RUNFORGE.' },
-    { skills: 'React runforge' },
-    { sourceUrl: 'https://t.me/runforge_team' },
-    { contact: 'RunForge_client' },
-  ])('исключает Runforge независимо от регистра и поля: %j', patch => {
-    expect(isRelevant(order(patch))).toBe(false);
+    { title: 'Проект BlockedBrand' },
+    { description: 'Разработка для BLOCKEDBRAND.' },
+    { skills: 'React blockedbrand' },
+    { sourceUrl: 'https://t.me/blockedbrand_team' },
+    { contact: 'BlockedBrand_client' },
+  ])('исключает BlockedBrand независимо от регистра и поля: %j', patch => {
+    expect(isRelevant(order(patch), ['blockedbrand'])).toBe(false);
+  });
+  it('использует только переданные слова и ищет буквальное совпадение', () => {
+    const o = order({ title: 'Проект BlockedBrand' });
+    expect(isRelevant(o)).toBe(true);
+    expect(isRelevant(o, [])).toBe(true);
+    expect(isRelevant(o, ['другое слово', '  BLOCKEDBRAND  '])).toBe(false);
+    expect(isRelevant(o, ['.*', '   '])).toBe(true);
   });
   it.each(['https://t.me/s/channel/123', 'https://t.me/channel/123', 'https://t.me/example_bot',
     'https://t.me/example/app?startapp=abc', 'https://t.me/example?start=abc', 'https://t.me/+secret',
@@ -86,11 +93,11 @@ describe('Сбор из Connect', () => {
       yield order().url;
       yield order({ id: ID2, url: `https://connect.tg/orders/${ID2}` }).url;
     });
-    vi.spyOn(client, 'order').mockResolvedValueOnce(order({ description: 'Проект Runforge' }))
+    vi.spyOn(client, 'order').mockResolvedValueOnce(order({ description: 'Проект BlockedBrand' }))
       .mockResolvedValueOnce(order({ id: ID2, url: `https://connect.tg/orders/${ID2}` }));
     const resolve = vi.spyOn(client, 'resolve').mockImplementation(async o => o);
     try {
-      await collect(store, client);
+      await collect(store, client, undefined, ['blockedbrand']);
       expect(resolve).toHaveBeenCalledTimes(1);
       expect(store.orders().map(o => o.id)).toEqual([ID2]);
       expect(store.queue().map(o => o.id)).toEqual([ID2]);
@@ -99,16 +106,16 @@ describe('Сбор из Connect', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  it('не сохраняет заказ, если Runforge обнаружен в раскрытой ссылке', async () => {
+  it('не сохраняет заказ, если BlockedBrand обнаружен в раскрытой ссылке', async () => {
     const client = new ConnectClient();
     vi.spyOn(client, 'links').mockImplementation(async function* () { yield order().url; });
     vi.spyOn(client, 'order').mockResolvedValue(order());
-    vi.spyOn(client, 'resolve').mockResolvedValue(order({ sourceUrl: 'https://t.me/runforge_team' }));
+    vi.spyOn(client, 'resolve').mockResolvedValue(order({ sourceUrl: 'https://t.me/blockedbrand_team' }));
     const dir = mkdtempSync(join(tmpdir(), 'connect-filter-'));
     const store = new Store(join(dir, 'db.sqlite'));
     const upsert = vi.spyOn(store, 'upsert');
     try {
-      await collect(store, client);
+      await collect(store, client, undefined, ['blockedbrand']);
       expect(upsert).not.toHaveBeenCalled();
     } finally {
       store.close();

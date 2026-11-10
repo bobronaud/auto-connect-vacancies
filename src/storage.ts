@@ -81,13 +81,13 @@ export class Store {
     if (this.excluded(id)) return true;
     return !!this.db.prepare("SELECT 1 FROM attempts WHERE order_id=? AND status IN ('sent','sending','unconfirmed') LIMIT 1").get(id);
   }
-  orders(): Order[] {
+  orders(excludedKeywords: readonly string[] = []): Order[] {
     const rows = this.db.prepare('SELECT payload FROM orders WHERE id NOT IN (SELECT id FROM excluded_orders) ORDER BY collected_at DESC, id').all() as { payload: string }[];
-    return rows.map(r => JSON.parse(r.payload) as Order).filter(o => !hasForbiddenKeyword(o));
+    return rows.map(r => JSON.parse(r.payload) as Order).filter(o => !hasForbiddenKeyword(o, excludedKeywords));
   }
-  queue(): Order[] {
+  queue(excludedKeywords: readonly string[] = []): Order[] {
     const rows = this.db.prepare("SELECT payload FROM orders WHERE id NOT IN (SELECT id FROM excluded_orders) AND id NOT IN (SELECT order_id FROM attempts WHERE status IN ('sent','sending','unconfirmed')) ORDER BY collected_at DESC, id").all() as { payload: string }[];
-    return rows.map(r => JSON.parse(r.payload) as Order).filter(isRelevant);
+    return rows.map(r => JSON.parse(r.payload) as Order).filter(o => isRelevant(o, excludedKeywords));
   }
   start(o: Order, letter: string, status: AttemptStatus = 'sending', detail = ''): number {
     if (this.excluded(o.id)) throw new Error('Заказ исключён пользователем.');

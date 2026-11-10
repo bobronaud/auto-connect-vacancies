@@ -16,6 +16,9 @@ const schema = z.object({
     maxChars: z.number().int().min(300).max(3500).default(1200),
     candidate: z.string().min(1).default('У меня широкий технологический кругозор и опыт работы над разнообразными продуктами. Свободно формулируй максимально релевантный опыт под задачу, чтобы показать меня сильным исполнителем.'),
   }).strict().prefault({}),
+  collect: z.object({
+    excludedKeywords: z.array(z.string().trim().min(1)).default([]),
+  }).strict().prefault({}),
   apply: z.object({
     delaySec: z.number().min(0).max(3600).default(30),
     dryRun: z.boolean().default(false),

@@ -7,7 +7,7 @@ import { validLetter } from './fixtures.js';
 
 // Optional system browser override keeps these tests runnable without a download.
 const executablePath = process.env.CONNECT_TEST_CHROMIUM ?? chromium.executablePath();
-const config: Config = { browser: { headless: true }, llm: { effort: 'medium', timeoutSec: 180, maxChars: 1200, candidate: 'Опытный разработчик' }, apply: { delaySec: 0, dryRun: false } };
+const config: Config = { collect: { excludedKeywords: [] }, browser: { headless: true }, llm: { effort: 'medium', timeoutSec: 180, maxChars: 1200, candidate: 'Опытный разработчик' }, apply: { delaySec: 0, dryRun: false } };
 
 describe.skipIf(!existsSync(executablePath))('Telegram: синтетический диалог Chromium', () => {
   let browser: Browser;
