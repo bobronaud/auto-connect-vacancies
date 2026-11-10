@@ -3,6 +3,10 @@ import { chooseContact, contactsFromSource, parseOrder, personalUsername, textCo
 import { isRelevant } from '../src/types.js';
 import { publicAddress } from '../src/connect/http.js';
 import { html, ID, ID2, order } from './fixtures.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { Store } from '../src/storage.js';
 
 describe('Карточки и контакты', () => {
   it('читает полное описание и разделяет навыки, исключая похожие заказы', () => {
@@ -29,6 +33,15 @@ describe('Карточки и контакты', () => {
     expect(isRelevant(parseOrder(html({ status: 'Закрыт' }), order().url))).toBe(false);
     expect(isRelevant(parseOrder(html({ platform: 'Kwork' }), order().url))).toBe(false);
     expect(isRelevant(order({ specializations: ['Бэкенд-разработка'] }))).toBe(false);
+  });
+  it.each([
+    { title: 'Проект Runforge' },
+    { description: 'Разработка для RUNFORGE.' },
+    { skills: 'React runforge' },
+    { sourceUrl: 'https://t.me/runforge_team' },
+    { contact: 'RunForge_client' },
+  ])('исключает Runforge независимо от регистра и поля: %j', patch => {
+    expect(isRelevant(order(patch))).toBe(false);
   });
   it.each(['https://t.me/s/channel/123', 'https://t.me/channel/123', 'https://t.me/example_bot',
     'https://t.me/example/app?startapp=abc', 'https://t.me/example?start=abc', 'https://t.me/+secret',
@@ -59,12 +72,49 @@ vi.mock('../src/connect/http.js', async importOriginal => {
   return { ...actual, getDocument: vi.fn() };
 });
 import { getDocument, HttpError } from '../src/connect/http.js';
-import { ConnectClient } from '../src/connect/client.js';
+import { collect, ConnectClient } from '../src/connect/client.js';
 const get = vi.mocked(getDocument);
 const response = (text: string, location: string | null = null) => ({ text, location, url: 'https://connect.tg/', contentType: 'text/html' });
 
 describe('Сбор из Connect', () => {
   beforeEach(() => { get.mockReset(); });
+  it('не сохраняет запрещённые заказы и не ищет их контакты', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'connect-filter-'));
+    const store = new Store(join(dir, 'db.sqlite'));
+    const client = new ConnectClient();
+    vi.spyOn(client, 'links').mockImplementation(async function* () {
+      yield order().url;
+      yield order({ id: ID2, url: `https://connect.tg/orders/${ID2}` }).url;
+    });
+    vi.spyOn(client, 'order').mockResolvedValueOnce(order({ description: 'Проект Runforge' }))
+      .mockResolvedValueOnce(order({ id: ID2, url: `https://connect.tg/orders/${ID2}` }));
+    const resolve = vi.spyOn(client, 'resolve').mockImplementation(async o => o);
+    try {
+      await collect(store, client);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      expect(store.orders().map(o => o.id)).toEqual([ID2]);
+      expect(store.queue().map(o => o.id)).toEqual([ID2]);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it('не сохраняет заказ, если Runforge обнаружен в раскрытой ссылке', async () => {
+    const client = new ConnectClient();
+    vi.spyOn(client, 'links').mockImplementation(async function* () { yield order().url; });
+    vi.spyOn(client, 'order').mockResolvedValue(order());
+    vi.spyOn(client, 'resolve').mockResolvedValue(order({ sourceUrl: 'https://t.me/runforge_team' }));
+    const dir = mkdtempSync(join(tmpdir(), 'connect-filter-'));
+    const store = new Store(join(dir, 'db.sqlite'));
+    const upsert = vi.spyOn(store, 'upsert');
+    try {
+      await collect(store, client);
+      expect(upsert).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('обходит все страницы пяти специализаций и убирает дубли', async () => {
     const calls: URL[] = [];
     get.mockImplementation(async input => {

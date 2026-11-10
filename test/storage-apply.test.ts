@@ -15,6 +15,25 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'connect-test-')); store = n
 afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
 describe('Хранение', () => {
+  it('скрывает ранее сохранённые заказы Runforge из списка и очереди', () => {
+    store.upsert(order({ description: 'Проект RUNFORGE' }));
+    store.upsert(order({ id: ID2 }));
+    expect(store.orders().map(o => o.id)).toEqual([ID2]);
+    expect(store.queue().map(o => o.id)).toEqual([ID2]);
+  });
+  it('навсегда исключает выбранный заказ из списков и повторного сбора, сохраняя историю', () => {
+    const o = order(); store.upsert(o);
+    store.start(o, '', 'skipped', 'Нет контакта');
+    store.upsert(order({ id: ID2 }));
+    store.exclude([o.id]);
+    store.close(); store = new Store(join(dir, 'db.sqlite'));
+    store.upsert({ ...o, title: 'Повторно собранный заказ' });
+    expect(store.orders().map(o => o.id)).toEqual([ID2]);
+    expect(store.queue().map(o => o.id)).toEqual([ID2]);
+    expect(store.blocked(o.id)).toBe(true);
+    expect(() => store.start(o, validLetter)).toThrow('исключён');
+    expect(store.history()[0]?.snapshot.title).toBe(o.title);
+  });
   it('обновляет заказ, сохраняя снимок отправленного отклика', () => {
     const o = order(); store.upsert(o);
     const id = store.start(o, validLetter); store.finish(id, 'sent', 'ok', 123);
@@ -64,6 +83,15 @@ describe('Очередь отправки', () => {
     const { config, o, deps } = setup(); deps.refresh.mockResolvedValue({ ...o, open: false });
     await applyQueue(store, config, deps);
     expect(deps.sender.send).not.toHaveBeenCalled(); expect(store.queue()).toHaveLength(0);
+  });
+  it('не генерирует письмо и не отправляет отклик, если при обновлении появился Runforge', async () => {
+    const { config, o, deps } = setup();
+    deps.refresh.mockResolvedValue({ ...o, description: 'Проект Runforge' });
+    await applyQueue(store, config, deps);
+    expect(deps.letter).not.toHaveBeenCalled();
+    expect(deps.sender.prepare).not.toHaveBeenCalled();
+    expect(deps.sender.send).not.toHaveBeenCalled();
+    expect(store.queue()).toHaveLength(0);
   });
   it('при ошибке генератора не начинает отправку', async () => {
     const { config, deps } = setup(); deps.letter.mockRejectedValue(new Error('Ошибка Codex'));

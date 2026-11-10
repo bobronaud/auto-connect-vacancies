@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Order } from '../types.js';
-import { isRelevant } from '../types.js';
+import { hasForbiddenKeyword, isRelevant } from '../types.js';
 import { errorText, log, pause, throwIfAborted } from '../utils.js';
 import { getDocument, HttpError } from './http.js';
 import { chooseContact, contactsFromSource, orderId, parseOrder, personalUsername, ROLE_LABELS, textContacts } from './parse.js';
@@ -97,14 +97,16 @@ export class ConnectClient {
 }
 
 export async function collect(store: Store, client: ConnectClient, signal?: AbortSignal): Promise<void> {
-  let saved = 0, unavailable = 0, skipped = 0;
+  let saved = 0, unavailable = 0, skipped = 0, forbidden = 0;
   for await (const url of client.links()) {
     throwIfAborted(signal);
     const id = orderId(url);
     if (store.blocked(id)) { skipped++; continue; }
     try {
       let o = await client.order(url);
+      if (hasForbiddenKeyword(o)) { forbidden++; continue; }
       if (isRelevant(o)) o = await client.resolve(o);
+      if (hasForbiddenKeyword(o)) { forbidden++; continue; }
       store.upsert(o);
       if (isRelevant(o)) {
         saved++;
@@ -118,5 +120,5 @@ export async function collect(store: Store, client: ConnectClient, signal?: Abor
     }
     await pause(250, signal);
   }
-  log.success(`Сбор завершён. Подходящих: ${saved}, без однозначного контакта: ${unavailable}, уже обработано: ${skipped}.`);
+  log.success(`Сбор завершён. Подходящих: ${saved}, без однозначного контакта: ${unavailable}, уже обработано: ${skipped}, исключено по слову Runforge: ${forbidden}.`);
 }

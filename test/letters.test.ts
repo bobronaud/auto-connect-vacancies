@@ -4,7 +4,7 @@ import { codexArgs, parseCodexEvents } from '../src/llm/codexCli.js';
 import type { Config } from '../src/config.js';
 import { order, validLetter } from './fixtures.js';
 
-const config: Config = { browser: { headless: true }, llm: { effort: 'medium', timeoutSec: 180, maxChars: 1200, candidate: '5+ лет опыта' }, apply: { delaySec: 0, dryRun: false } };
+const config: Config = { browser: { headless: true }, llm: { effort: 'medium', timeoutSec: 180, maxChars: 1200, candidate: 'Разработчик с широким технологическим кругозором' }, apply: { delaySec: 0, dryRun: false } };
 describe('Генерация писем', () => {
   it('передаёт полное описание и навыки и возвращает готовое письмо', async () => {
     const run = vi.fn(async (_req: { system: string; prompt: string }) => validLetter);
@@ -16,6 +16,17 @@ describe('Генерация писем', () => {
     const run = vi.fn().mockResolvedValueOnce('Коротко').mockResolvedValueOnce(validLetter);
     expect(await generateLetter(order(), config, undefined, run)).toBe(validLetter);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+  it.each(['5+ лет опыта', 'более 5 лет опыта', 'пять лет опыта', 'Опыт разработки более 5 лет', '5+ years of experience', 'five years of experience'])('отклоняет стаж «%s» и перегенерирует письмо', async experience => {
+    const invalid = `${validLetter} ${experience}.`;
+    expect(letterProblems(invalid, 1200)).toContain('запрещено указывать стаж кандидата в годах');
+    const run = vi.fn().mockResolvedValueOnce(invalid).mockResolvedValueOnce(validLetter);
+    expect(await generateLetter(order(), config, undefined, run)).toBe(validLetter);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it('не возвращает письмо при повторном упоминании стажа', async () => {
+    const run = vi.fn(async () => `${validLetter} У меня 5+ лет опыта.`);
+    await expect(generateLetter(order(), config, undefined, run)).rejects.toThrow('запрещено указывать стаж');
   });
   it('повторяет один раз при временной ошибке Codex', async () => {
     const run = vi.fn().mockRejectedValueOnce(new Error('Временная ошибка')).mockResolvedValueOnce(validLetter);

@@ -3,7 +3,7 @@ import { chmodSync, closeSync, existsSync, openSync, readFileSync, unlinkSync, w
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Attempt, AttemptStatus, Order } from './types.js';
-import { isRelevant } from './types.js';
+import { hasForbiddenKeyword, isRelevant } from './types.js';
 import { privateDir } from './utils.js';
 
 /** A process lock also protects the persistent Chromium profile. */
@@ -53,28 +53,44 @@ export class Store {
         detail TEXT NOT NULL DEFAULT '', message_id INTEGER, created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS attempts_order ON attempts(order_id, status);
+      CREATE TABLE IF NOT EXISTS excluded_orders (
+        id TEXT PRIMARY KEY, excluded_at TEXT NOT NULL
+      );
       PRAGMA user_version = 1;
     `);
     // A crashed send can have reached Telegram; never retry it automatically.
     this.db.prepare("UPDATE attempts SET status='unconfirmed', detail='Работа прервана во время отправки; проверьте диалог в Telegram' WHERE status='sending'").run();
   }
   close(): void { this.db.close(); }
+  exclude(ids: string[]): void {
+    const insert = this.db.prepare('INSERT OR IGNORE INTO excluded_orders VALUES (?, ?)');
+    this.db.transaction(() => {
+      const now = new Date().toISOString();
+      for (const id of ids) insert.run(id, now);
+    })();
+  }
+  excluded(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM excluded_orders WHERE id=?').get(id);
+  }
   upsert(o: Order): void {
+    if (this.excluded(o.id)) return;
     this.db.prepare('INSERT INTO orders VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, collected_at=excluded.collected_at')
       .run(o.id, JSON.stringify(o), o.collectedAt);
   }
   blocked(id: string): boolean {
+    if (this.excluded(id)) return true;
     return !!this.db.prepare("SELECT 1 FROM attempts WHERE order_id=? AND status IN ('sent','sending','unconfirmed') LIMIT 1").get(id);
   }
   orders(): Order[] {
-    const rows = this.db.prepare('SELECT payload FROM orders ORDER BY collected_at DESC, id').all() as { payload: string }[];
-    return rows.map(r => JSON.parse(r.payload) as Order);
+    const rows = this.db.prepare('SELECT payload FROM orders WHERE id NOT IN (SELECT id FROM excluded_orders) ORDER BY collected_at DESC, id').all() as { payload: string }[];
+    return rows.map(r => JSON.parse(r.payload) as Order).filter(o => !hasForbiddenKeyword(o));
   }
   queue(): Order[] {
-    const rows = this.db.prepare("SELECT payload FROM orders WHERE id NOT IN (SELECT order_id FROM attempts WHERE status IN ('sent','sending','unconfirmed')) ORDER BY collected_at DESC, id").all() as { payload: string }[];
+    const rows = this.db.prepare("SELECT payload FROM orders WHERE id NOT IN (SELECT id FROM excluded_orders) AND id NOT IN (SELECT order_id FROM attempts WHERE status IN ('sent','sending','unconfirmed')) ORDER BY collected_at DESC, id").all() as { payload: string }[];
     return rows.map(r => JSON.parse(r.payload) as Order).filter(isRelevant);
   }
   start(o: Order, letter: string, status: AttemptStatus = 'sending', detail = ''): number {
+    if (this.excluded(o.id)) throw new Error('Заказ исключён пользователем.');
     if (this.blocked(o.id)) throw new Error('Для заказа уже существует отправленный или неподтверждённый отклик.');
     return Number(this.db.prepare('INSERT INTO attempts(order_id,snapshot,letter,recipient,status,detail,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(o.id, JSON.stringify(o), letter, o.contact, status, detail, new Date().toISOString()).lastInsertRowid);
